@@ -10,7 +10,7 @@ fn main() {
      for stream in listener.incoming() {
          match stream {
              Ok( mut stream ) => {
-                    let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n+PONG\r\n";
+                    let response = b"+PONG\r\n";
                     let mut buf  = [ 0; 1024 ];
                     let     _    = stream.read( &mut buf );
 
