@@ -1,4 +1,5 @@
 use std::{io::{BufRead, BufReader, BufWriter, Write}, net::{TcpListener, TcpStream}};
+use redis_starter_rust::ThreadPool;
 
 
 const ADDRESS: &str    = "127.0.0.1";
@@ -6,7 +7,7 @@ const PORT   : &str    = "6379";
 const PONG   : &[ u8 ] = b"+PONG\r\n";
 
 
-fn handle_request( stream: &mut TcpStream ) {
+fn handle_connection( stream: &mut TcpStream ) {
     let     stream_clone = stream.try_clone().unwrap();
     let mut reader       = BufReader::new( stream );
     let mut writer       = BufWriter::new( stream_clone );
@@ -34,12 +35,15 @@ fn handle_request( stream: &mut TcpStream ) {
 
 
 fn main() {
+    let pool     = ThreadPool::new( 4 );
     let listener = TcpListener::bind( format!( "{}:{}", ADDRESS, PORT ) ).unwrap();
 
     for stream in listener.incoming() {
         match stream {
             Ok( mut stream ) => {
-                handle_request( &mut stream );
+                pool.execute( move || {
+                    handle_connection( &mut stream );
+                });
             }
             Err( e ) => {
                 println!( "error: {}", e );
