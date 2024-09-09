@@ -1,5 +1,5 @@
 use core::str;
-use std::{io::{Read, Write}, net::TcpStream, string::FromUtf8Error};
+use std::{collections::HashMap, io::{Read, Write}, net::TcpStream, string::FromUtf8Error};
 
 
 const RESP_ARRAY_START : u8 = b'*';
@@ -34,7 +34,8 @@ enum Mode {
 
 impl Resp {
     pub fn handle_connection( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut buffer = [ 0; 1024 ];
+        let mut buffer                         = [ 0; 1024 ];
+        let mut state: HashMap<String, String> = HashMap::new();
 
         loop {
             match stream.read( &mut buffer ) {
@@ -65,6 +66,25 @@ impl Resp {
                         Some( cmd ) if cmd == "ECHO" => {
                             let arg = args_it.next().ok_or( "missing argument" )?;
                             let ser = serialize_resp_str( &arg )?;
+
+                            stream.write_all( ser.as_bytes() )?;
+                            stream.flush()?;
+                        }
+
+                        Some( cmd ) if cmd == "SET" => {
+                            let key = args_it.next().ok_or( "missing key" )?;
+                            let val = args_it.next().ok_or( "missing val" )?;
+
+                            state.insert( key.to_string(), val.to_string() );
+
+                            stream.write_all( b"+OK\r\n" )?;
+                            stream.flush()?;
+                        }
+
+                        Some( cmd ) if cmd == "GET" => {
+                            let key = args_it.next().ok_or( "missing key" )?;
+                            let val = state.get( key ).ok_or( "key not found" )?;
+                            let ser = serialize_resp_str( &val )?;
 
                             stream.write_all( ser.as_bytes() )?;
                             stream.flush()?;

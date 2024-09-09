@@ -1,4 +1,4 @@
-use std::{io::{BufWriter, Write}, net::{TcpListener, TcpStream}};
+use std::net::TcpListener;
 use redis_starter_rust::ThreadPool;
 use resp::connection::Resp;
 
@@ -8,7 +8,6 @@ mod resp;
 
 const ADDRESS: &str    = "127.0.0.1";
 const PORT   : &str    = "6379";
-const PONG   : &[ u8 ] = b"+PONG\r\n";
 
 
 fn main() {
