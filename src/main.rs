@@ -1,6 +1,6 @@
 use std::net::TcpListener;
 use redis_starter_rust::ThreadPool;
-use resp::connection::Resp;
+use resp::connection::handle_connection;
 
 
 mod resp;
@@ -20,7 +20,7 @@ fn main() {
                 let mut stream_copy = stream.try_clone().unwrap();
 
                 pool.execute( move || {
-                    let _ = Resp::handle_connection( &mut stream_copy );
+                    let _ = handle_connection( &mut stream_copy );
                 });
             }
             Err( e ) => {
