@@ -81,8 +81,11 @@ pub fn handle_connection( stream: &mut TcpStream ) -> Result<(), Box<dyn std::er
                         let val = state.get( key ).ok_or( "key not found" )?;
 
                         if val.expiry.is_some() && val.expiry.unwrap() < Instant::now() {
+                            state.remove( key );
+
                             stream.write_all( b"$-1\r\n" )?;
                             stream.flush()?;
+
                             continue;
                         }
 
