@@ -1,6 +1,6 @@
-use std::{env, net::TcpListener};
+use std::{env, net::TcpListener, sync::{Arc, Mutex}};
 use redis_starter_rust::ThreadPool;
-use resp::connection::handle_connection;
+use resp::connection::{handle_connection, AppState};
 
 
 mod resp;
@@ -21,14 +21,16 @@ fn main() {
 
     let pool     = ThreadPool::new( 4 );
     let listener = TcpListener::bind( format!( "{}:{}", ADDRESS, port ) ).unwrap();
+    let state    = Arc::new( Mutex::new( AppState::default() ) );
 
     for stream in listener.incoming() {
         match stream {
             Ok( stream ) => {
                 let mut stream_copy = stream.try_clone().unwrap();
+                let     state       = state.clone();
 
                 pool.execute( move || {
-                    let _ = handle_connection( &mut stream_copy );
+                    let _ = handle_connection( &mut stream_copy, &state );
                 });
             }
             Err( e ) => {

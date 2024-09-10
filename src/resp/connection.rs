@@ -1,11 +1,29 @@
 use core::str;
-use std::{collections::HashMap, io::{Read, Write}, net::TcpStream, string::FromUtf8Error, time::{Duration, Instant}};
+use std::{collections::HashMap, io::{Read, Write}, net::TcpStream, slice::Iter, string::FromUtf8Error, sync::{Arc, Mutex}, time::{Duration, Instant}};
 
 
 const RESP_ARRAY_START : u8 = b'*';
 const RESP_STRING_START: u8 = b'$';
 
-const PONG   : &[ u8 ] = b"+PONG\r\n";
+
+enum ServerRole {
+    Master,
+    Slave
+}
+
+
+struct ReplicationInfo {
+    role: ServerRole
+}
+
+
+impl Default for ReplicationInfo {
+    fn default() -> Self {
+        Self {
+            role: ServerRole::Master
+        }
+    }
+}
 
 
 struct RespArg {
@@ -14,9 +32,120 @@ struct RespArg {
 }
 
 
-pub fn handle_connection( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
+#[derive( Default )]
+pub struct AppState {
+    replication_info: ReplicationInfo,
+    state           : HashMap<String, RespArg>,
+}
+
+
+fn handle_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
+    const PONG : &[ u8 ] = b"+PONG\r\n";
+
+    stream.write_all( PONG )?;
+    stream.flush()?;
+
+    Ok( () )
+}
+
+
+fn handle_echo( stream: &mut TcpStream, args_it: &mut Iter<String> ) -> Result<(), Box<dyn std::error::Error>> {
+    let arg = args_it.next().ok_or( "missing argument" )?;
+    let ser = serialize_resp_str( &arg )?;
+
+    stream.write_all( ser.as_bytes() )?;
+    stream.flush()?;
+
+    Ok( () )
+}
+
+
+fn handle_set( stream : &mut TcpStream,
+               args_it: &mut Iter<String>,
+               state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut px  = None;
+    let     key = args_it.next().ok_or( "missing key" )?;
+    let     val = args_it.next().ok_or( "missing val" )?;
+
+    if let Some( _ ) = args_it.next() {
+        let now = Instant::now();
+        let dur = i32::from_str_radix( args_it.next().ok_or( "missing expiry" )?, 10 )?;
+        let exp = now + Duration::from_millis( dur as u64 );
+
+        px = Some( exp );
+    }
+
+    let val = RespArg {
+        expiry: px,
+        value:  val.to_string(),
+    };
+
+    let mut state = state.lock().unwrap();
+
+    state.state.insert( key.to_string(), val );
+
+    stream.write_all( b"+OK\r\n" )?;
+    stream.flush()?;
+
+    Ok( () )
+}
+
+
+fn handle_get( stream : &mut TcpStream,
+               args_it: &mut Iter<String>,
+               state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut state = state.lock().unwrap();
+
+    let key = args_it.next().ok_or( "missing key" )?;
+    let val = state.state.get( key ).ok_or( "key not found" )?;
+
+    if val.expiry.is_some() && val.expiry.unwrap() < Instant::now() {
+        state.state.remove( key );
+
+        stream.write_all( b"$-1\r\n" )?;
+        stream.flush()?;
+
+        return Ok( () )
+    }
+
+    let ser = serialize_resp_str( &val.value )?;
+
+    stream.write_all( ser.as_bytes() )?;
+    stream.flush()?;
+
+    Ok( () )
+}
+
+
+fn handle_info( stream : &mut TcpStream,
+                args_it: &mut Iter<String>,
+                state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+    let section = args_it.next().ok_or( "missing section" )?;
+
+    match section.as_str() {
+        "replication" => {
+            let state = state.lock().unwrap();
+            let role  = match state.replication_info.role {
+                ServerRole::Master => "master",
+                ServerRole::Slave  => "slave",
+            };
+
+            stream.write_all( format!( "+role:{}\r\n", role ).as_bytes() )?;
+            stream.flush()?;
+        }
+
+        _ => {
+            stream.write_all( b"+UNSUPPORTED\r\n" )?;
+            stream.flush()?;
+        }
+    }
+
+    Ok( () )
+}
+
+
+pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer                          = [ 0; 1024 ];
-    let mut state: HashMap<String, RespArg> = HashMap::new();
 
     loop {
         match stream.read( &mut buffer ) {
@@ -29,70 +158,43 @@ pub fn handle_connection( stream: &mut TcpStream ) -> Result<(), Box<dyn std::er
 
                 for ( i, ch ) in buffer[ ..bytes_read ].iter().enumerate() {
                     if *ch == RESP_STRING_START {
-                        let len = char::to_digit( buffer[ i + 1 ] as char, 10 ).unwrap() as usize;
-                        args.push( str::from_utf8( &buffer[ i + 4..i + 4 + len ] )?.to_string() );
+                        let mut digits = 0;
+
+                        while buffer[ i + 1 + digits ] != b'\r' {
+                            digits += 1;
+                        }
+
+                        let len    = usize::from_str_radix( &str::from_utf8( &buffer[ i + 1..i + 1 + digits ] )?, 10 )?;
+                        let offset = if len > 9 { 5 } else { 4 };
+
+                        args.push( str::from_utf8( &buffer[ i + offset..i + offset + len ] )?.to_string() );
                     }
                 }
 
                 println!( "args: {:?}", args );
 
-                let mut args_it = args.iter();
+                let mut args_it     = args.iter();
+                let mut stream_copy = stream.try_clone().unwrap();
 
                 match args_it.next() {
                     Some( cmd ) if cmd == "PING" => {
-                        stream.write_all( PONG )?;
-                        stream.flush()?;
+                        let _ = handle_ping( &mut stream_copy );
                     }
 
                     Some( cmd ) if cmd == "ECHO" => {
-                        let arg = args_it.next().ok_or( "missing argument" )?;
-                        let ser = serialize_resp_str( &arg )?;
-
-                        stream.write_all( ser.as_bytes() )?;
-                        stream.flush()?;
+                        let _ = handle_echo( &mut stream_copy, &mut args_it );
                     }
 
                     Some( cmd ) if cmd == "SET" => {
-                        let mut px  = None;
-                        let     key = args_it.next().ok_or( "missing key" )?;
-                        let     val = args_it.next().ok_or( "missing val" )?;
-
-                        if let Some( _ ) = args_it.next() {
-                            let now = Instant::now();
-                            let dur = i32::from_str_radix( args_it.next().ok_or( "missing expiry" )?, 10 )?;
-                            let exp = now + Duration::from_millis( dur as u64 );
-
-                            px = Some( exp );
-                        }
-
-                        let val = RespArg {
-                            expiry: px,
-                            value:  val.to_string(),
-                        };
-
-                        state.insert( key.to_string(), val );
-
-                        stream.write_all( b"+OK\r\n" )?;
-                        stream.flush()?;
+                        let _ = handle_set( &mut stream_copy, &mut args_it, &state );
                     }
 
                     Some( cmd ) if cmd == "GET" => {
-                        let key = args_it.next().ok_or( "missing key" )?;
-                        let val = state.get( key ).ok_or( "key not found" )?;
+                        let _ = handle_get( &mut stream_copy, &mut args_it, &state );
+                    }
 
-                        if val.expiry.is_some() && val.expiry.unwrap() < Instant::now() {
-                            state.remove( key );
-
-                            stream.write_all( b"$-1\r\n" )?;
-                            stream.flush()?;
-
-                            continue;
-                        }
-
-                        let ser = serialize_resp_str( &val.value )?;
-
-                        stream.write_all( ser.as_bytes() )?;
-                        stream.flush()?;
+                    Some( cmd ) if cmd == "INFO" => {
+                        let _ = handle_info( &mut stream_copy, &mut args_it, &state );
                     }
 
                     Some( _ ) => {
