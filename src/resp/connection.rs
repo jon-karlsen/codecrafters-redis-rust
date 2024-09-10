@@ -144,8 +144,31 @@ fn handle_info( stream : &mut TcpStream,
 }
 
 
+fn parse_args( buffer    : &mut [ u8 ],
+               bytes_read: usize ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut args: Vec<String> = vec![];
+
+    for ( i, ch ) in buffer[ ..bytes_read ].iter().enumerate() {
+        if *ch == RESP_STRING_START {
+            let mut digits = 0;
+
+            while buffer[ i + 1 + digits ] != b'\r' {
+                digits += 1;
+            }
+
+            let len    = usize::from_str_radix( &str::from_utf8( &buffer[ i + 1..i + 1 + digits ] )?, 10 )?;
+            let offset = if len > 9 { 5 } else { 4 };
+
+            args.push( str::from_utf8( &buffer[ i + offset..i + offset + len ] )?.to_string() );
+        }
+    }
+
+    Ok( args )
+}
+
+
 pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut buffer                          = [ 0; 1024 ];
+    let mut buffer = [ 0; 1024 ];
 
     loop {
         match stream.read( &mut buffer ) {
@@ -154,22 +177,7 @@ pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> )
             }
 
             Ok( bytes_read ) => {
-                let mut args: Vec<String> = vec![];
-
-                for ( i, ch ) in buffer[ ..bytes_read ].iter().enumerate() {
-                    if *ch == RESP_STRING_START {
-                        let mut digits = 0;
-
-                        while buffer[ i + 1 + digits ] != b'\r' {
-                            digits += 1;
-                        }
-
-                        let len    = usize::from_str_radix( &str::from_utf8( &buffer[ i + 1..i + 1 + digits ] )?, 10 )?;
-                        let offset = if len > 9 { 5 } else { 4 };
-
-                        args.push( str::from_utf8( &buffer[ i + offset..i + offset + len ] )?.to_string() );
-                    }
-                }
+                let args = parse_args( &mut buffer, bytes_read )?;
 
                 println!( "args: {:?}", args );
 
