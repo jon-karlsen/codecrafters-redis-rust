@@ -93,13 +93,30 @@ fn handle_info( stream : &mut TcpStream,
 
     match section.as_str() {
         "replication" => {
-            let state = state.lock().unwrap();
-            let role  = match state.replication_info.role {
+            let state              = state.lock().unwrap();
+            let role               = match state.replication_info.role {
                 ServerRole::Master => "master",
                 ServerRole::Slave  => "slave",
             };
+            let master_replid      = state.master_replid.clone();
+            let master_repl_offset = state.master_repl_offset;
 
-            stream.write_all( format!( "+role:{}\r\n", role ).as_bytes() )?;
+            let mut content = String::new();
+
+            content.push_str( &format!( "role:{}"               , role               ) );
+            content.push_str( &format!( ",master_replid:{}"     , master_replid      ) );
+            content.push_str( &format!( ",master_repl_offset:{}", master_repl_offset ) );
+
+            println!( "{}", content );
+
+            let content_len = content.len();
+
+            stream.write_all( b"$" )?;
+            stream.write_all( &content_len.to_string().as_bytes() )?;
+            stream.write_all( b"\r\n" )?;
+            stream.write_all( content.as_bytes() )?;
+            stream.write_all( b"\r\n" )?;
+
             stream.flush()?;
         }
 
