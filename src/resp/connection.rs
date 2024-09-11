@@ -1,42 +1,11 @@
 use core::str;
-use std::{collections::HashMap, io::{Read, Write}, net::TcpStream, slice::Iter, string::FromUtf8Error, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{io::{Read, Write}, net::TcpStream, slice::Iter, string::FromUtf8Error, sync::{Arc, Mutex}, time::{Duration, Instant}};
+
+use crate::infra::app_state::{AppState, RedisStateValue, ServerRole};
 
 
 const RESP_ARRAY_START : u8 = b'*';
 const RESP_STRING_START: u8 = b'$';
-
-
-enum ServerRole {
-    Master,
-    Slave
-}
-
-
-struct ReplicationInfo {
-    role: ServerRole
-}
-
-
-impl Default for ReplicationInfo {
-    fn default() -> Self {
-        Self {
-            role: ServerRole::Master
-        }
-    }
-}
-
-
-struct RespArg {
-    expiry: Option<Instant>,
-    value:  String,
-}
-
-
-#[derive( Default )]
-pub struct AppState {
-    replication_info: ReplicationInfo,
-    state           : HashMap<String, RespArg>,
-}
 
 
 fn handle_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
@@ -75,14 +44,14 @@ fn handle_set( stream : &mut TcpStream,
         px = Some( exp );
     }
 
-    let val = RespArg {
+    let val = RedisStateValue {
         expiry: px,
         value:  val.to_string(),
     };
 
     let mut state = state.lock().unwrap();
 
-    state.state.insert( key.to_string(), val );
+    state.redis_state.insert( key.to_string(), val );
 
     stream.write_all( b"+OK\r\n" )?;
     stream.flush()?;
@@ -97,10 +66,10 @@ fn handle_get( stream : &mut TcpStream,
     let mut state = state.lock().unwrap();
 
     let key = args_it.next().ok_or( "missing key" )?;
-    let val = state.state.get( key ).ok_or( "key not found" )?;
+    let val = state.redis_state.get( key ).ok_or( "key not found" )?;
 
     if val.expiry.is_some() && val.expiry.unwrap() < Instant::now() {
-        state.state.remove( key );
+        state.redis_state.remove( key );
 
         stream.write_all( b"$-1\r\n" )?;
         stream.flush()?;
@@ -167,6 +136,27 @@ fn parse_args( buffer    : &mut [ u8 ],
 }
 
 
+pub fn serialize_resp_str( input: &str ) -> Result<String, FromUtf8Error>  {
+    let mut result = vec![
+        RESP_STRING_START,
+    ];
+
+    for b in input.len().to_string().as_bytes() {
+        result.push( *b );
+    }
+
+    result.push( b'\r' );
+    result.push( b'\n' );
+
+    result.extend( input.as_bytes() );
+
+    result.push( b'\r' );
+    result.push( b'\n' );
+
+    String::from_utf8( result )
+}
+
+
 pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [ 0; 1024 ];
 
@@ -225,22 +215,4 @@ pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> )
     }
 
     Ok( () )
-}
-
-
-pub fn serialize_resp_str( input: &str ) -> Result<String, FromUtf8Error>  {
-    let mut result = vec![
-        RESP_STRING_START,
-        char::from_digit( input.len() as u32, 10 ).unwrap() as u8
-    ];
-
-    result.push( b'\r' );
-    result.push( b'\n' );
-
-    result.extend( input.as_bytes() );
-
-    result.push( b'\r' );
-    result.push( b'\n' );
-
-    String::from_utf8( result )
 }
