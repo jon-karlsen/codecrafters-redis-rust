@@ -1,7 +1,7 @@
-use std::{env, net::TcpListener, sync::{Arc, Mutex}};
+use std::{env, io::Write, net::{TcpListener, TcpStream}, sync::{Arc, Mutex}};
 use infra::app_state::{AppState, ServerRole};
 use redis_starter_rust::ThreadPool;
-use resp::connection::handle_connection;
+use resp::{connection::handle_connection, encode::encode_resp_arr};
 
 
 mod infra;
@@ -28,12 +28,16 @@ fn main() -> Result<() , Box<dyn std::error::Error>> {
 
             ARG_REPLICAOF => {
                 let host_port = &args[ i + 1 ].split_once( " " ).ok_or( "invalid --replicaof arg" )?;
-                let _host = host_port.0;
-                let _port = host_port.1;
-
-                println!( "replicaof: {} {}", _host, _port );
+                let host = host_port.0;
+                let port = host_port.1;
 
                 state.replication_info.role = ServerRole::Slave;
+
+                let mut master_stream = TcpStream::connect( format!( "{}:{}", host, port ) )?;
+                let     message       = encode_resp_arr( vec![ "PING".to_string() ] )?;
+
+                master_stream.write_all( message.as_bytes() )?;
+                master_stream.flush()?;
             }
 
             a => {

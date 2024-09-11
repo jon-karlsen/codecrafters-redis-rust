@@ -1,11 +1,9 @@
 use core::str;
-use std::{io::{Read, Write}, net::TcpStream, slice::Iter, string::FromUtf8Error, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{io::{Read, Write}, net::TcpStream, slice::Iter, sync::{Arc, Mutex}, time::{Duration, Instant}};
 
 use crate::infra::app_state::{AppState, RedisStateValue, ServerRole};
 
-
-const RESP_ARRAY_START : u8 = b'*';
-const RESP_STRING_START: u8 = b'$';
+use super::encode::{encode_bulk_string, encode_resp_str, RESP_STRING_START};
 
 
 fn handle_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
@@ -20,7 +18,7 @@ fn handle_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error
 
 fn handle_echo( stream: &mut TcpStream, args_it: &mut Iter<String> ) -> Result<(), Box<dyn std::error::Error>> {
     let arg = args_it.next().ok_or( "missing argument" )?;
-    let ser = serialize_resp_str( &arg )?;
+    let ser = encode_resp_str( &arg )?;
 
     stream.write_all( ser.as_bytes() )?;
     stream.flush()?;
@@ -77,7 +75,7 @@ fn handle_get( stream : &mut TcpStream,
         return Ok( () )
     }
 
-    let ser = serialize_resp_str( &val.value )?;
+    let ser = encode_resp_str( &val.value )?;
 
     stream.write_all( ser.as_bytes() )?;
     stream.flush()?;
@@ -93,29 +91,22 @@ fn handle_info( stream : &mut TcpStream,
 
     match section.as_str() {
         "replication" => {
-            let state              = state.lock().unwrap();
-            let role               = match state.replication_info.role {
+            let     state  = state.lock().unwrap();
+            let mut output = vec![];
+
+            let role = match state.replication_info.role {
                 ServerRole::Master => "master",
                 ServerRole::Slave  => "slave",
             };
+
             let master_replid      = state.master_replid.clone();
             let master_repl_offset = state.master_repl_offset;
 
-            let mut content = String::new();
+            output.push( format!( "role:{}"               , role               ) );
+            output.push( format!( ",master_replid:{}"     , master_replid      ) );
+            output.push( format!( ",master_repl_offset:{}", master_repl_offset ) );
 
-            content.push_str( &format!( "role:{}"               , role               ) );
-            content.push_str( &format!( ",master_replid:{}"     , master_replid      ) );
-            content.push_str( &format!( ",master_repl_offset:{}", master_repl_offset ) );
-
-            println!( "{}", content );
-
-            let content_len = content.len();
-
-            stream.write_all( b"$" )?;
-            stream.write_all( &content_len.to_string().as_bytes() )?;
-            stream.write_all( b"\r\n" )?;
-            stream.write_all( content.as_bytes() )?;
-            stream.write_all( b"\r\n" )?;
+            stream.write_all( encode_bulk_string( output )?.as_bytes() )?;
 
             stream.flush()?;
         }
@@ -150,27 +141,6 @@ fn parse_args( buffer    : &mut [ u8 ],
     }
 
     Ok( args )
-}
-
-
-pub fn serialize_resp_str( input: &str ) -> Result<String, FromUtf8Error>  {
-    let mut result = vec![
-        RESP_STRING_START,
-    ];
-
-    for b in input.len().to_string().as_bytes() {
-        result.push( *b );
-    }
-
-    result.push( b'\r' );
-    result.push( b'\n' );
-
-    result.extend( input.as_bytes() );
-
-    result.push( b'\r' );
-    result.push( b'\n' );
-
-    String::from_utf8( result )
 }
 
 
