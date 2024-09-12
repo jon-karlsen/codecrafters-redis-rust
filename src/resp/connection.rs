@@ -1,9 +1,7 @@
 use core::str;
 use std::{io::{Read, Write}, net::TcpStream, slice::Iter, sync::{Arc, Mutex}, time::{Duration, Instant}};
-
 use crate::infra::app_state::{AppState, RedisStateValue, ServerRole};
-
-use super::encode::{encode_bulk_string, encode_resp_str, RESP_STRING_START};
+use super::{constants::*, encode::{encode_bulk_string, encode_resp_str, RESP_STRING_START}};
 
 
 fn handle_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
@@ -21,6 +19,14 @@ fn handle_echo( stream: &mut TcpStream, args_it: &mut Iter<String> ) -> Result<(
     let ser = encode_resp_str( &arg )?;
 
     stream.write_all( ser.as_bytes() )?;
+    stream.flush()?;
+
+    Ok( () )
+}
+
+
+fn handle_replconfig( stream: &mut TcpStream, _state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+    stream.write_all( b"+OK\r\n" )?;
     stream.flush()?;
 
     Ok( () )
@@ -156,30 +162,32 @@ pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> )
             Ok( bytes_read ) => {
                 let args = parse_args( &mut buffer, bytes_read )?;
 
-                println!( "args: {:?}", args );
-
                 let mut args_it     = args.iter();
                 let mut stream_copy = stream.try_clone().unwrap();
 
                 match args_it.next() {
-                    Some( cmd ) if cmd == "PING" => {
+                    Some( cmd ) if cmd.as_str() == CMD_PING => {
                         let _ = handle_ping( &mut stream_copy );
                     }
 
-                    Some( cmd ) if cmd == "ECHO" => {
+                    Some( cmd ) if cmd.as_str() == CMD_ECHO => {
                         let _ = handle_echo( &mut stream_copy, &mut args_it );
                     }
 
-                    Some( cmd ) if cmd == "SET" => {
+                    Some( cmd ) if cmd.as_str() == CMD_SET => {
                         let _ = handle_set( &mut stream_copy, &mut args_it, &state );
                     }
 
-                    Some( cmd ) if cmd == "GET" => {
+                    Some( cmd ) if cmd.as_str() == CMD_GET => {
                         let _ = handle_get( &mut stream_copy, &mut args_it, &state );
                     }
 
-                    Some( cmd ) if cmd == "INFO" => {
+                    Some( cmd ) if cmd.as_str() == CMD_INFO => {
                         let _ = handle_info( &mut stream_copy, &mut args_it, &state );
+                    }
+
+                    Some( cmd ) if cmd.as_str() == CMD_REPLCONF => {
+                        let _ = handle_replconfig( &mut stream_copy, &state );
                     }
 
                     Some( _ ) => {
@@ -192,7 +200,6 @@ pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> )
                         stream.flush()?;
                     }
                 }
-
             }
 
             Err( e ) => {

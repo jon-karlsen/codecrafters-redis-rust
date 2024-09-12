@@ -1,7 +1,7 @@
-use std::{env, io::Write, net::{TcpListener, TcpStream}, sync::{Arc, Mutex}};
+use std::{env, io::{Read, Write}, net::{TcpListener, TcpStream}, sync::{Arc, Mutex}};
 use infra::app_state::{AppState, ServerRole};
 use redis_starter_rust::ThreadPool;
-use resp::{connection::handle_connection, encode::encode_resp_arr};
+use resp::{connection::handle_connection, constants::CMD_REPLCONF, encode::encode_resp_arr};
 
 
 mod infra;
@@ -33,18 +33,45 @@ fn main() -> Result<() , Box<dyn std::error::Error>> {
 
                 state.replication_info.role = ServerRole::Slave;
 
-                let mut master_stream = TcpStream::connect( format!( "{}:{}", host, port ) )?;
-                let     message       = encode_resp_arr( vec![ "PING".to_string() ] )?;
+                let mut stream  = TcpStream::connect( format!( "{}:{}", host, port ) )?;
+                let     message = encode_resp_arr( vec![ "PING".to_string() ] )?;
 
-                master_stream.write_all( message.as_bytes() )?;
-                master_stream.flush()?;
+                stream.write_all( message.as_bytes() )?;
+                stream.flush()?;
+
+                let mut buffer = [ 0; 1024 ];
+
+                loop {
+                    match stream.read( &mut buffer ) {
+                        Ok( 0 ) => {
+                            break;
+                        }
+
+                        Ok( bytes_read ) => {
+                            let res = String::from_utf8( buffer[ ..bytes_read ].to_vec() )?;
+
+                            if res.starts_with( "+PONG" ) {
+                                stream.write_all( encode_resp_arr( vec![ CMD_REPLCONF.to_string(), "listening-port".to_string(), state.port.to_string() ] )?.as_bytes() )?;
+                                stream.flush()?;
+                            }
+
+                            if res.starts_with( "+OK" ) {
+                                stream.write_all( encode_resp_arr( vec![ CMD_REPLCONF.to_string() , "capa".to_string(), "psync2".to_string() ] )?.as_bytes() )?;
+                                stream.flush()?;
+                            }
+                        }
+
+                        Err(_) => todo!(),
+                    }
+                }
+
+
             }
 
             a => {
-                println!( "unknown arg: {}", a );
+                println!( "unknown arg: '{}'. Is it a value?", a );
             }
         }
-
     }
 
     let pool      = ThreadPool::new( 4 );

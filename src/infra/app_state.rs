@@ -34,6 +34,8 @@ pub struct RedisStateValue {
 pub struct AppState {
     pub replication_info: ReplicationInfo,
     pub redis_state       : HashMap<String, RedisStateValue>,
+    pub master_host       : String,
+    pub master_port       : i32,
     pub master_replid     : String,
     pub master_repl_offset: usize,
     pub port              : i32,
@@ -45,6 +47,8 @@ impl Default for AppState {
         Self {
             replication_info: ReplicationInfo::default(),
             redis_state       : HashMap::new(),
+            master_host       : "localhost".to_string(),
+            master_port       : 6379,
             master_replid     : DEMO_MASTER_REPLID.to_string(),
             master_repl_offset: 0,
             port              : DEFAULT_PORT,
