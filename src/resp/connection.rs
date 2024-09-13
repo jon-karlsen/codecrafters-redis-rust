@@ -1,10 +1,10 @@
 use core::str;
 use std::{io::{Read, Write}, net::TcpStream, slice::Iter, sync::{Arc, Mutex}, time::{Duration, Instant}};
 use crate::infra::app_state::{AppState, RedisStateValue, ServerRole};
-use super::{constants::*, encode::{encode_bulk_string, encode_resp_str, RESP_STRING_START}};
+use super::{constants::*, encode::{encode_bulk_string, encode_resp_str, encode_simple_str, RESP_STRING_START}};
 
 
-fn handle_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_cmd_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
     const PONG : &[ u8 ] = b"+PONG\r\n";
 
     stream.write_all( PONG )?;
@@ -14,9 +14,8 @@ fn handle_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error
 }
 
 
-fn handle_echo( stream: &mut TcpStream, args_it: &mut Iter<String> ) -> Result<(), Box<dyn std::error::Error>> {
-    let arg = args_it.next().ok_or( "missing argument" )?;
-    let ser = encode_resp_str( &arg )?;
+fn handle_cmd_echo( stream: &mut TcpStream, args_it: &mut Iter<String> ) -> Result<(), Box<dyn std::error::Error>> {
+    let arg = args_it.next().ok_or( "missing argument" )?; let ser = encode_resp_str( &arg )?;
 
     stream.write_all( ser.as_bytes() )?;
     stream.flush()?;
@@ -25,7 +24,7 @@ fn handle_echo( stream: &mut TcpStream, args_it: &mut Iter<String> ) -> Result<(
 }
 
 
-fn handle_replconfig( stream: &mut TcpStream, _state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_cmd_replconfig( stream: &mut TcpStream, _state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     stream.write_all( b"+OK\r\n" )?;
     stream.flush()?;
 
@@ -33,7 +32,7 @@ fn handle_replconfig( stream: &mut TcpStream, _state: &Arc<Mutex<AppState>> ) ->
 }
 
 
-fn handle_set( stream : &mut TcpStream,
+fn handle_cmd_set( stream : &mut TcpStream,
                args_it: &mut Iter<String>,
                state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let mut px  = None;
@@ -64,7 +63,7 @@ fn handle_set( stream : &mut TcpStream,
 }
 
 
-fn handle_get( stream : &mut TcpStream,
+fn handle_cmd_get( stream : &mut TcpStream,
                args_it: &mut Iter<String>,
                state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let mut state = state.lock().unwrap();
@@ -90,7 +89,7 @@ fn handle_get( stream : &mut TcpStream,
 }
 
 
-fn handle_info( stream : &mut TcpStream,
+fn handle_cmd_info( stream : &mut TcpStream,
                 args_it: &mut Iter<String>,
                 state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let section = args_it.next().ok_or( "missing section" )?;
@@ -108,9 +107,13 @@ fn handle_info( stream : &mut TcpStream,
             let master_replid      = state.master_replid.clone();
             let master_repl_offset = state.master_repl_offset;
 
-            output.push( format!( "role:{}"               , role               ) );
-            output.push( format!( ",master_replid:{}"     , master_replid      ) );
-            output.push( format!( ",master_repl_offset:{}", master_repl_offset ) );
+            output.push( format!( "role:{}", role ) );
+
+            if ! String::is_empty( &master_replid) {
+                output.push( format!( "master_replid:{}", "asd" ) );
+            }
+
+            output.push( format!( "master_repl_offset:{}", master_repl_offset ) );
 
             stream.write_all( encode_bulk_string( output )?.as_bytes() )?;
 
@@ -129,6 +132,8 @@ fn handle_info( stream : &mut TcpStream,
 
 fn parse_args( buffer    : &mut [ u8 ],
                bytes_read: usize ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    println!( "parse_args" );
+
     let mut args: Vec<String> = vec![];
 
     for ( i, ch ) in buffer[ ..bytes_read ].iter().enumerate() {
@@ -150,6 +155,17 @@ fn parse_args( buffer    : &mut [ u8 ],
 }
 
 
+fn handle_cmd_psync( stream: &mut TcpStream,
+                     _state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+    let reply = encode_simple_str( "OK" )?;
+
+    stream.write_all( reply.as_bytes() )?;
+    stream.flush()?;
+
+    Ok( () )
+}
+
+
 pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [ 0; 1024 ];
 
@@ -162,37 +178,47 @@ pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> )
             Ok( bytes_read ) => {
                 let args = parse_args( &mut buffer, bytes_read )?;
 
+                println!( "args (cmd): {:?}", args );
+
                 let mut args_it     = args.iter();
                 let mut stream_copy = stream.try_clone().unwrap();
 
                 match args_it.next() {
-                    Some( cmd ) if cmd.as_str() == CMD_PING => {
-                        let _ = handle_ping( &mut stream_copy );
-                    }
+                    Some( cmd ) => {
+                        match cmd.as_str() {
+                            CMD_PING => {
+                                let _ = handle_cmd_ping( &mut stream_copy );
+                            }
 
-                    Some( cmd ) if cmd.as_str() == CMD_ECHO => {
-                        let _ = handle_echo( &mut stream_copy, &mut args_it );
-                    }
+                            CMD_ECHO => {
+                                let _ = handle_cmd_echo( &mut stream_copy, &mut args_it );
+                            }
 
-                    Some( cmd ) if cmd.as_str() == CMD_SET => {
-                        let _ = handle_set( &mut stream_copy, &mut args_it, &state );
-                    }
+                            CMD_SET => {
+                                let _ = handle_cmd_set( &mut stream_copy, &mut args_it, &state );
+                            }
 
-                    Some( cmd ) if cmd.as_str() == CMD_GET => {
-                        let _ = handle_get( &mut stream_copy, &mut args_it, &state );
-                    }
+                            CMD_GET => {
+                                let _ = handle_cmd_get( &mut stream_copy, &mut args_it, &state );
+                            }
 
-                    Some( cmd ) if cmd.as_str() == CMD_INFO => {
-                        let _ = handle_info( &mut stream_copy, &mut args_it, &state );
-                    }
+                            CMD_INFO => {
+                                let _ = handle_cmd_info( &mut stream_copy, &mut args_it, &state );
+                            }
 
-                    Some( cmd ) if cmd.as_str() == CMD_REPLCONF => {
-                        let _ = handle_replconfig( &mut stream_copy, &state );
-                    }
+                            CMD_REPLCONF => {
+                                let _ = handle_cmd_replconfig( &mut stream_copy, &state );
+                            }
 
-                    Some( _ ) => {
-                        stream.write_all( b"+OK\r\n" )?;
-                        stream.flush()?;
+                            CMD_PSYNC => {
+                                let _ = handle_cmd_psync( &mut stream_copy, &state );
+                            }
+
+                            _ => {
+                                stream.write_all( b"+OK\r\n" )?;
+                                stream.flush()?;
+                            }
+                        }
                     }
 
                     None => {

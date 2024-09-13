@@ -4,3 +4,4 @@ pub const CMD_SET     : &str = "SET";
 pub const CMD_GET     : &str = "GET";
 pub const CMD_INFO    : &str = "INFO";
 pub const CMD_REPLCONF: &str = "REPLCONF";
+pub const CMD_PSYNC   : &str = "PSYNC";

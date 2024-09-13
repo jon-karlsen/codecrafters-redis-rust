@@ -1,11 +1,23 @@
-use std::string::FromUtf8Error;
+pub const RESP_ARRAY_START        : u8 = b'*';
+pub const RESP_STRING_START       : u8 = b'$';
+pub const RESP_SIMPLE_STRING_START: u8 = b'+';
 
 
-pub const RESP_ARRAY_START : u8 = b'*';
-pub const RESP_STRING_START: u8 = b'$';
+pub fn encode_simple_str( input: &str ) -> anyhow::Result<String> {
+    let mut result = vec![
+        RESP_SIMPLE_STRING_START
+    ];
+
+    result.extend( input.as_bytes() );
+
+    result.push( b'\r' );
+    result.push( b'\n' );
+
+    Ok( String::from_utf8( result )? )
+}
 
 
-pub fn encode_resp_str( input: &str ) -> Result<String, FromUtf8Error>  {
+pub fn encode_resp_str( input: &str ) -> anyhow::Result<String>  {
     let mut result = vec![
         RESP_STRING_START,
     ];
@@ -22,11 +34,13 @@ pub fn encode_resp_str( input: &str ) -> Result<String, FromUtf8Error>  {
     result.push( b'\r' );
     result.push( b'\n' );
 
-    String::from_utf8( result )
+    Ok( String::from_utf8( result )? )
 }
 
 
-pub fn encode_bulk_string( parts: Vec<String> ) -> Result<String, Box<dyn std::error::Error>> {
+pub fn encode_bulk_string( parts: Vec<String> ) -> anyhow::Result<String> { 
+    println!( "{:?}", parts );
+
     let mut wrapper = String::from( "$" );
     let mut content = String::new();
 
@@ -47,7 +61,7 @@ pub fn encode_bulk_string( parts: Vec<String> ) -> Result<String, Box<dyn std::e
 }
 
 
-pub fn encode_resp_arr( parts: Vec<String> ) -> Result<String, Box<dyn std::error::Error>> {
+pub fn encode_resp_arr( parts: Vec<String> ) -> anyhow::Result<String> {
     let mut wrapper = String::from( "*" );
     let mut content = String::new();
 
