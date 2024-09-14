@@ -15,7 +15,7 @@ fn handle_cmd_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::E
 
 
 fn handle_cmd_echo( stream: &mut TcpStream, args_it: &mut Iter<String> ) -> Result<(), Box<dyn std::error::Error>> {
-    let arg = args_it.next().ok_or( "missing argument" )?; let ser = encode_resp_str( &arg )?;
+    let arg = args_it.next().ok_or( "missing argument" )?; let ser = encode_simple_str( &arg )?;
 
     stream.write_all( ser.as_bytes() )?;
     stream.flush()?;
@@ -33,8 +33,8 @@ fn handle_cmd_replconfig( stream: &mut TcpStream, _state: &Arc<Mutex<AppState>> 
 
 
 fn handle_cmd_set( stream : &mut TcpStream,
-               args_it: &mut Iter<String>,
-               state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+                   args_it: &mut Iter<String>,
+                   state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let mut px  = None;
     let     key = args_it.next().ok_or( "missing key" )?;
     let     val = args_it.next().ok_or( "missing val" )?;
@@ -64,8 +64,8 @@ fn handle_cmd_set( stream : &mut TcpStream,
 
 
 fn handle_cmd_get( stream : &mut TcpStream,
-               args_it: &mut Iter<String>,
-               state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+                   args_it: &mut Iter<String>,
+                   state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let mut state = state.lock().unwrap();
 
     let key = args_it.next().ok_or( "missing key" )?;
@@ -80,7 +80,7 @@ fn handle_cmd_get( stream : &mut TcpStream,
         return Ok( () )
     }
 
-    let ser = encode_resp_str( &val.value )?;
+    let ser = encode_simple_str( &val.value )?;
 
     stream.write_all( ser.as_bytes() )?;
     stream.flush()?;
@@ -90,8 +90,8 @@ fn handle_cmd_get( stream : &mut TcpStream,
 
 
 fn handle_cmd_info( stream : &mut TcpStream,
-                args_it: &mut Iter<String>,
-                state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+                    args_it: &mut Iter<String>,
+                    state  : &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
     let section = args_it.next().ok_or( "missing section" )?;
 
     match section.as_str() {
@@ -110,7 +110,7 @@ fn handle_cmd_info( stream : &mut TcpStream,
             output.push( format!( "role:{}", role ) );
 
             if ! String::is_empty( &master_replid) {
-                output.push( format!( "master_replid:{}", "asd" ) );
+                output.push( format!( "master_replid:{}", master_replid ) );
             }
 
             output.push( format!( "master_repl_offset:{}", master_repl_offset ) );
@@ -156,10 +156,12 @@ fn parse_args( buffer    : &mut [ u8 ],
 
 
 fn handle_cmd_psync( stream: &mut TcpStream,
-                     _state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
-    let reply = encode_simple_str( "OK" )?;
+                     state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
+    let state = state.lock().unwrap();
 
-    stream.write_all( reply.as_bytes() )?;
+    let reply = format!( "FULLRESYNC {} 0", state.master_replid.clone() );
+
+    stream.write_all( encode_resp_str( &reply )?.as_bytes() )?;
     stream.flush()?;
 
     Ok( () )

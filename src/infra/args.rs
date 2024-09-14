@@ -41,18 +41,9 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
             }
 
             Ok( bytes_read ) => {
-                let res = match String::from_utf8( buffer[ ..bytes_read ].to_vec() ) {
-                    Ok( res ) => res,
-                    Err( _ ) => {
-                        println!( "invalid utf8" );
-                        String::from( "" )
-                    },
-                };
+                let raw = &buffer[ ..bytes_read ];
 
-                println!( "res: {}", res );
-
-                if counter == 0 && res.starts_with( "+PONG" ) {
-                    println!( "0" );
+                if counter == 0 && raw.starts_with( b"+PONG" ) {
                     let cmds = vec![
                         CMD_REPLCONF.to_string(),
                         "listening-port".to_string(),
@@ -63,8 +54,7 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
                     stream.flush()?;
                 }
 
-                if counter == 1 && res.starts_with( "+OK" ) {
-                    println!( "1" );
+                if counter == 1 && raw.starts_with( b"+OK" ) {
                     let cmds = vec![
                         CMD_REPLCONF.to_string(),
                         "capa".to_string(),
@@ -76,8 +66,7 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
                 }
 
 
-                if counter == 2 && res.starts_with( "+OK" ) {
-                    println!( "2" );
+                if counter == 2 && raw.starts_with( b"+OK" ) {
                     let cmds = vec![
                         CMD_PSYNC.to_string(),
                         "?".to_string(),

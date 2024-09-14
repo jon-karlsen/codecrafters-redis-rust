@@ -39,8 +39,6 @@ pub fn encode_resp_str( input: &str ) -> anyhow::Result<String>  {
 
 
 pub fn encode_bulk_string( parts: Vec<String> ) -> anyhow::Result<String> { 
-    println!( "{:?}", parts );
-
     let mut wrapper = String::from( "$" );
     let mut content = String::new();
 
