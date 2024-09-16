@@ -2,7 +2,7 @@ use core::str;
 use std::{io::{Read, Write}, net::TcpStream, slice::Iter, sync::{Arc, Mutex}, time::{Duration, Instant}};
 use base64::prelude::*;
 use crate::infra::app_state::{AppState, RedisStateValue, ServerRole};
-use super::{constants::*, encode::{encode_rdb_file, encode_bulk_string, encode_resp_str, encode_simple_str, RESP_STRING_START}};
+use super::{constants::*, encode::{encode_bulk_string, encode_rdb_file, encode_resp_arr, encode_resp_str, encode_simple_str, RESP_STRING_START}};
 
 
 fn handle_cmd_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
@@ -55,7 +55,14 @@ fn handle_cmd_set( stream : &mut TcpStream,
 
     let mut state = state.lock().unwrap();
 
-    state.redis_state.insert( key.to_string(), val );
+    state.redis_state.insert( key.to_string(), val.clone() );
+
+    for mut s in &state.slave_connections {
+        let enc = encode_resp_arr( vec![ CMD_SET, key, &val.value ] )?;
+
+        s.write_all( enc.as_bytes() )?;
+        s.flush()?;
+    }
 
     stream.write_all( b"+OK\r\n" )?;
     stream.flush()?;
@@ -105,16 +112,17 @@ fn handle_cmd_info( stream : &mut TcpStream,
                 ServerRole::Slave  => "slave",
             };
 
-            let master_replid      = state.master_replid.clone();
-            let master_repl_offset = state.master_repl_offset;
+            let role               = format!( "role:{}", role );
+            let master_replid      = format!( "master_replid:{}", state.master_replid.clone() );
+            let master_repl_offset = format!( "master_repl_offset:{}", state.master_repl_offset );
 
-            output.push( format!( "role:{}", role ) );
+            output.push( role.as_str() );
 
             if ! String::is_empty( &master_replid) {
-                output.push( format!( "master_replid:{}", master_replid ) );
+                output.push( master_replid.as_str() );
             }
 
-            output.push( format!( "master_repl_offset:{}", master_repl_offset ) );
+            output.push( master_repl_offset.as_str() );
 
             stream.write_all( encode_bulk_string( output )?.as_bytes() )?;
 
@@ -158,7 +166,7 @@ fn parse_args( buffer    : &mut [ u8 ],
 
 fn handle_cmd_psync( stream: &mut TcpStream,
                      state: &Arc<Mutex<AppState>> ) -> Result<(), Box<dyn std::error::Error>> {
-    let state = state.lock().unwrap();
+    let mut state = state.lock().unwrap();
 
     let reply = format!( "FULLRESYNC {} 0", state.master_replid.clone() );
 
@@ -171,6 +179,8 @@ fn handle_cmd_psync( stream: &mut TcpStream,
 
     stream.write_all( &encoded )?;
     stream.flush()?;
+
+    state.slave_connections.push( stream.try_clone().unwrap() );
 
     Ok( () )
 }

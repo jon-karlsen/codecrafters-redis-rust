@@ -26,7 +26,7 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
     state.replication_info.role = ServerRole::Slave;
 
     let mut stream  = TcpStream::connect( format!( "{}:{}", host, port ) )?;
-    let     message = encode_resp_arr( vec![ "PING".to_string() ] )?;
+    let     message = encode_resp_arr( vec![ "PING" ] )?;
 
     stream.write_all( message.as_bytes() )?;
     stream.flush()?;
@@ -44,10 +44,11 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
                 let res = &buffer[ ..bytes_read ];
 
                 if counter == 0 && res.starts_with( b"+PONG" ) {
+                    let port = state.port.to_string();
                     let cmds = vec![
-                        CMD_REPLCONF.to_string(),
-                        "listening-port".to_string(),
-                        state.port.to_string(),
+                        CMD_REPLCONF,
+                        "listening-port",
+                        port.as_str(),
                     ];
 
                     stream.write_all( encode_resp_arr( cmds )?.as_bytes() )?;
@@ -56,9 +57,9 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
 
                 if counter == 1 && res.starts_with( b"+OK" ) {
                     let cmds = vec![
-                        CMD_REPLCONF.to_string(),
-                        "capa".to_string(),
-                        "psync2".to_string() 
+                        CMD_REPLCONF,
+                        "capa",
+                        "psync2" 
                     ];
 
                     stream.write_all( encode_resp_arr( cmds )?.as_bytes() )?;
@@ -68,9 +69,9 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
 
                 if counter == 2 && res.starts_with( b"+OK" ) {
                     let cmds = vec![
-                        CMD_PSYNC.to_string(),
-                        "?".to_string(),
-                        "-1".to_string(),
+                        CMD_PSYNC,
+                        "?",
+                        "-1",
                     ];
 
                     stream.write_all( encode_resp_arr( cmds )?.as_bytes() )?;

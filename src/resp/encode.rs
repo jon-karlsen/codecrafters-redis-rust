@@ -38,7 +38,7 @@ pub fn encode_resp_str( input: &str ) -> anyhow::Result<String>  {
 }
 
 
-pub fn encode_bulk_string( parts: Vec<String> ) -> anyhow::Result<String> {
+pub fn encode_bulk_string( parts: Vec<&str> ) -> anyhow::Result<String> {
     let mut wrapper = String::from( "$" );
     let mut content = String::new();
 
@@ -77,12 +77,12 @@ pub fn encode_rdb_file( input: &Vec<u8> ) -> anyhow::Result<Vec<u8>> {
 }
 
 
-pub fn encode_resp_arr( parts: Vec<String> ) -> anyhow::Result<String> {
+pub fn encode_resp_arr( parts: Vec<&str> ) -> anyhow::Result<String> {
     let mut wrapper = String::from( "*" );
     let mut content = String::new();
 
     for part in parts.iter() {
-        let s = encode_bulk_string( vec![ part.to_owned() ] )?;
+        let s = encode_bulk_string( vec![ part ] )?;
 
         content.push_str( &s );
     }

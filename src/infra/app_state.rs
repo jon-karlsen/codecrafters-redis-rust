@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, net::TcpStream, time::Instant};
 
 
 const DEFAULT_PORT      : i32  = 6379;
@@ -31,27 +31,39 @@ pub struct RedisStateValue {
 }
 
 
+impl Clone for RedisStateValue {
+    fn clone(&self) -> Self {
+        Self {
+            expiry: self.expiry.clone(),
+            value:  self.value.clone(),
+        }
+    }
+}
+
+
 pub struct AppState {
-    pub replication_info  : ReplicationInfo,
-    pub redis_state       : HashMap<String, RedisStateValue>,
-    pub master_host       : String,
-    pub master_port       : i32,
-    pub master_replid     : String,
-    pub master_repl_offset: usize,
-    pub port              : i32,
+    pub     _master_host      : String,
+    pub     _master_port      : i32,
+    pub     master_replid     : String,
+    pub     master_repl_offset: usize,
+    pub     port              : i32,
+    pub     replication_info  : ReplicationInfo,
+    pub     redis_state       : HashMap<String, RedisStateValue>,
+    pub     slave_connections : Vec<TcpStream>,
 }
 
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            replication_info  : ReplicationInfo::default(),
-            redis_state       : HashMap::new(),
-            master_host       : "localhost".to_string(),
-            master_port       : 6379,
+            _master_host       : "localhost".to_string(),
+            _master_port       : 6379,
             master_replid     : DEMO_MASTER_REPLID.to_string(),
             master_repl_offset: 0,
             port              : DEFAULT_PORT,
+            replication_info  : ReplicationInfo::default(),
+            redis_state       : HashMap::new(),
+            slave_connections : vec![],
         }
     }
 }
