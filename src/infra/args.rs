@@ -59,7 +59,7 @@ fn handle_arg_replicaof( state: &mut AppState, arg: &str ) -> Result<(), Box<dyn
                     let cmds = vec![
                         CMD_REPLCONF,
                         "capa",
-                        "psync2" 
+                        "psync2"
                     ];
 
                     stream.write_all( encode_resp_arr( cmds )?.as_bytes() )?;
