@@ -1,7 +1,8 @@
 use core::str;
 use std::{io::{Read, Write}, net::TcpStream, slice::Iter, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use base64::prelude::*;
 use crate::infra::app_state::{AppState, RedisStateValue, ServerRole};
-use super::{constants::*, encode::{encode_bulk_string, encode_resp_str, encode_simple_str, RESP_STRING_START}};
+use super::{constants::*, encode::{encode_rdb_file, encode_bulk_string, encode_resp_str, encode_simple_str, RESP_STRING_START}};
 
 
 fn handle_cmd_ping( stream: &mut TcpStream ) -> Result<(), Box<dyn std::error::Error>> {
@@ -164,6 +165,13 @@ fn handle_cmd_psync( stream: &mut TcpStream,
     stream.write_all( encode_resp_str( &reply )?.as_bytes() )?;
     stream.flush()?;
 
+    let rdb_empty_b64 = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
+    let rdb_bytes     = BASE64_STANDARD.decode( rdb_empty_b64 )?;
+    let encoded       = encode_rdb_file( &rdb_bytes )?;
+
+    stream.write_all( &encoded )?;
+    stream.flush()?;
+
     Ok( () )
 }
 
@@ -188,33 +196,13 @@ pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> )
                 match args_it.next() {
                     Some( cmd ) => {
                         match cmd.as_str() {
-                            CMD_PING => {
-                                let _ = handle_cmd_ping( &mut stream_copy );
-                            }
-
-                            CMD_ECHO => {
-                                let _ = handle_cmd_echo( &mut stream_copy, &mut args_it );
-                            }
-
-                            CMD_SET => {
-                                let _ = handle_cmd_set( &mut stream_copy, &mut args_it, &state );
-                            }
-
-                            CMD_GET => {
-                                let _ = handle_cmd_get( &mut stream_copy, &mut args_it, &state );
-                            }
-
-                            CMD_INFO => {
-                                let _ = handle_cmd_info( &mut stream_copy, &mut args_it, &state );
-                            }
-
-                            CMD_REPLCONF => {
-                                let _ = handle_cmd_replconfig( &mut stream_copy, &state );
-                            }
-
-                            CMD_PSYNC => {
-                                let _ = handle_cmd_psync( &mut stream_copy, &state );
-                            }
+                            CMD_PING     => { let _ = handle_cmd_ping( &mut stream_copy ); }
+                            CMD_ECHO     => { let _ = handle_cmd_echo( &mut stream_copy, &mut args_it ); }
+                            CMD_SET      => { let _ = handle_cmd_set( &mut stream_copy, &mut args_it, &state ); }
+                            CMD_GET      => { let _ = handle_cmd_get( &mut stream_copy, &mut args_it, &state ); }
+                            CMD_INFO     => { let _ = handle_cmd_info( &mut stream_copy, &mut args_it, &state ); }
+                            CMD_REPLCONF => { let _ = handle_cmd_replconfig( &mut stream_copy, &state ); }
+                            CMD_PSYNC    => { let _ = handle_cmd_psync( &mut stream_copy, &state ); }
 
                             _ => {
                                 stream.write_all( b"+OK\r\n" )?;
@@ -237,4 +225,26 @@ pub fn handle_connection( stream: &mut TcpStream, state: &Arc<Mutex<AppState>> )
     }
 
     Ok( () )
+}
+
+
+#[cfg( test )]
+mod tests {
+    use base64::prelude::*;
+
+    use crate::resp::encode::encode_rdb_file;
+
+
+    #[test]
+    fn test_decode_base64() -> Result<(), Box<dyn std::error::Error>> {
+        let rdb_empty_b64 = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
+
+        let rdb_bytes     = BASE64_STANDARD.decode( rdb_empty_b64 )?;
+        println!( "rdb_bytes: {:?}", rdb_bytes );
+
+        let encoded       = encode_rdb_file( &rdb_bytes )?;
+        println!( "encoded: {:?}", encoded );
+
+        Ok( () )
+    }
 }

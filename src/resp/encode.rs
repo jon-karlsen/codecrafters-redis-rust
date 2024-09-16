@@ -38,7 +38,7 @@ pub fn encode_resp_str( input: &str ) -> anyhow::Result<String>  {
 }
 
 
-pub fn encode_bulk_string( parts: Vec<String> ) -> anyhow::Result<String> { 
+pub fn encode_bulk_string( parts: Vec<String> ) -> anyhow::Result<String> {
     let mut wrapper = String::from( "$" );
     let mut content = String::new();
 
@@ -56,6 +56,24 @@ pub fn encode_bulk_string( parts: Vec<String> ) -> anyhow::Result<String> {
     wrapper.push_str( "\r\n" );
 
     Ok( wrapper )
+}
+
+
+pub fn encode_rdb_file( input: &Vec<u8> ) -> anyhow::Result<Vec<u8>> {
+    let mut result = vec![
+        RESP_STRING_START,
+    ];
+
+    for b in input.len().to_string().as_bytes() {
+        result.push( *b );
+    }
+
+    result.push( b'\r' );
+    result.push( b'\n' );
+
+    result.extend( input );
+
+    Ok( result )
 }
 
 
